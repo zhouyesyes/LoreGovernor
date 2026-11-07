@@ -38,16 +38,39 @@ export function governedState(settings, selection, book, uid, originalEnabled) {
     return null;
 }
 
+const activeSyncs = new WeakMap();
+
 // 不触发原生 click/input/change，不接触世界书数据或保存接口。
 export function createNativePanelSync({ document, worldNames, getSettings, getSelection, getCaptured }) {
     if (!document?.body || typeof MutationObserver !== 'function') return () => {};
+    activeSyncs.get(document)?.();
     const managed = new Map();
-    let queued = false;
+    let timer = null;
+    let disposed = false;
+    let list = document.getElementById('world_popup_entries_list');
     const observer = new MutationObserver(schedule);
-    const observe = () => observer.observe(document.body, {
-        childList: true, subtree: true, attributes: true,
-        attributeFilter: ['class', 'uid', 'data-current-world', 'data-uid'],
+    const lifecycle = new MutationObserver(records => {
+        const next = document.getElementById('world_popup_entries_list');
+        if (next !== list) {
+            observer.disconnect();
+            list = next;
+            schedule();
+            return;
+        }
+        // Ignore unrelated chat rendering and counters.
+        if (list && records.some(record => record.target === list ||
+            ((record.type === 'attributes' || record.target !== document.body) && record.target.contains?.(list)))) schedule();
     });
+    function isOpen() {
+        return list?.isConnected && list.getClientRects().length > 0 &&
+            document.defaultView.getComputedStyle(list).visibility !== 'hidden';
+    }
+    const observe = () => {
+        if (!disposed && isOpen()) observer.observe(list, {
+            childList: true, subtree: true, attributes: true,
+            attributeFilter: ['class', 'uid', 'data-current-world', 'data-uid'],
+        });
+    };
     function restore(row, state) {
         state.visual.remove();
         state.badge.remove();
@@ -58,17 +81,20 @@ export function createNativePanelSync({ document, worldNames, getSettings, getSe
         managed.delete(row);
     }
     function sync() {
-        queued = false;
+        timer = null;
+        if (disposed) return;
         observer.disconnect();
+        // Hidden panels may retain thousands of rows: never enumerate them.
+        if (!isOpen()) return;
         try {
             const select = document.querySelector('#world_editor_select');
             const book = select && select.value !== '' ? worldNames[select.value] : null;
             const settings = getSettings();
             const selection = getSelection();
-            const rows = new Set(document.querySelectorAll('#world_popup_entries_list .world_entry[uid]'));
+            const rows = new Set(list.querySelectorAll('.world_entry[uid]'));
             for (const [row, state] of managed) {
                 if (!rows.has(row) || state.book !== book || state.uid !== row.getAttribute('uid') ||
-                    !row.contains(state.original) || !row.contains(state.visual)) restore(row, state);
+                    !row.contains(state.original) || !row.contains(state.visual) || !row.contains(state.badge)) restore(row, state);
             }
             for (const row of rows) {
                 const uid = row.getAttribute('uid');
@@ -100,12 +126,16 @@ export function createNativePanelSync({ document, worldNames, getSettings, getSe
                     original.after(visual, badge);
                 }
                 const enabled = getCaptured(book, uid)?.enabled ?? expected;
+                if (row.classList.contains('disabledWIEntry') !== !enabled) {
+                    row.classList.toggle('disabledWIEntry', !enabled);
+                }
+                if (state.enabled === enabled) continue;
+                state.enabled = enabled;
                 state.visual.classList.toggle('fa-toggle-on', enabled);
                 state.visual.classList.toggle('fa-toggle-off', !enabled);
                 state.visual.setAttribute('aria-label', '聊天配置：' + (enabled ? '启用' : '关闭'));
                 state.visual.title = 'Lore Governor 当前聊天：' + (enabled ? '启用' : '关闭') + '。请在扩展中配置；不写回原始世界书。启用仍需满足关键词、概率等原生触发条件。';
                 state.badge.title = state.visual.title;
-                row.classList.toggle('disabledWIEntry', !enabled);
             }
         } catch {
             // 遇到未知版本或 DOM 时，撤下自己的显示，归还原生控件。
@@ -115,14 +145,30 @@ export function createNativePanelSync({ document, worldNames, getSettings, getSe
         }
     }
     function schedule() {
-        if (queued) return;
-        queued = true;
-        queueMicrotask(sync);
+        if (disposed || timer !== null) return;
+        // Coalesce events across tasks and read the latest chat when running.
+        timer = setTimeout(sync, 50);
     }
-    document.addEventListener('change', event => {
+    function onChange(event) {
         if (event.target?.id === 'world_editor_select') schedule();
+    }
+    function dispose() {
+        disposed = true;
+        clearTimeout(timer);
+        observer.disconnect();
+        lifecycle.disconnect();
+        document.removeEventListener('change', onChange);
+        for (const [row, state] of managed) restore(row, state);
+        if (activeSyncs.get(document) === dispose) activeSyncs.delete(document);
+    }
+    document.addEventListener('change', onChange);
+    // Only a lightweight lifecycle watcher remains while the panel is closed.
+    lifecycle.observe(document.body, {
+        childList: true, subtree: true, attributes: true,
+        attributeFilter: ['class', 'style', 'hidden'],
     });
-    observe();
+    activeSyncs.set(document, dispose);
+    schedule.dispose = dispose;
     schedule();
     return schedule;
 }
