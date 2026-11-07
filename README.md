@@ -66,3 +66,18 @@ To change a chat's selection later, use the **Configure lore for current chat** 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Visual sync performance checks
+
+The native World Info overlay batches notifications for 50 ms and reads the latest chat selection when it runs. It scans entries only while the list is visible; unrelated chat DOM updates are ignored. A lightweight lifecycle observer detects panel opening/replacement while the entry observer is disconnected on close. Reinitialization disposes the previous sync, and unchanged states do not rewrite the overlay. This does not change generation filtering or save World Info data.
+
+There is no build step. To run the DOM/logic regression tests with Node.js (jsdom is installed outside the repository):
+
+```sh
+npm install --prefix /tmp/loregovernor-check --no-package-lock --no-audit --no-fund jsdom@26
+NODE_PATH=/tmp/loregovernor-check/node_modules node --test tests/native-panel.test.mjs
+node --check native-panel.mjs
+node --input-type=module --check < index.js
+```
+
+For a real SillyTavern check, switch repeatedly between chats with different saved selections, both with World Info closed and open. Confirm the toggles, dimming, and “聊天配置 · 不写回原书” badge follow the final chat; save a selection, change books/pages, close/reopen the panel, and generate once. Unmanaged entries should retain native controls. Compare World Info contents before/after and verify prompt selection still follows the saved chat configuration. Browser timing and real-device responsiveness require manual validation.
