@@ -1,3 +1,28 @@
+/*
+MIT License
+
+Copyright (c) 2026 Zeaden
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
+import { createNativePanelSync } from './native-panel.mjs';
 import { eventSource, event_types } from '../../../../script.js';
 import { getContext } from '../../../extensions.js';
 import { world_names, loadWorldInfo, updateWorldInfoList } from '../../../world-info.js';
@@ -11,6 +36,13 @@ const BUCKET_ALWAYS_OFF = 'always_off';
 const BUCKET_UNMANAGED = 'unmanaged';
 let lastEffectiveStates = new Map();
 let hasCapturedEffectiveStates = false;
+let syncNativePanel = () => {};
+
+function invalidateVisualState() {
+    lastEffectiveStates = new Map();
+    hasCapturedEffectiveStates = false;
+    syncNativePanel();
+}
 
 const BUCKET_LABELS = {
     [BUCKET_ALWAYS_ON]: '始终启用',
@@ -45,6 +77,7 @@ function getSettings() {
 }
 
 function saveSettings() {
+    invalidateVisualState();
     getContext().saveSettingsDebounced();
 }
 
@@ -71,6 +104,7 @@ function saveChatSelection(selection) {
     const context = getContext();
     context.updateChatMetadata({ [CHAT_METADATA_KEY]: selection }, false);
     context.saveMetadataDebounced();
+    invalidateVisualState();
 }
 
 async function getBookEntries(bookName) {
@@ -129,6 +163,7 @@ function onWorldInfoEntriesLoaded(payload) {
             }
         }
     }
+    syncNativePanel();
 }
 
 function statusForEntry(bookName, uid) {
@@ -238,8 +273,7 @@ async function openStatusPanel() {
 }
 
 function onChatChanged() {
-    lastEffectiveStates = new Map();
-    hasCapturedEffectiveStates = false;
+    invalidateVisualState();
 }
 
 /**
@@ -636,6 +670,9 @@ async function renderSettings() {
 }
 
 jQuery(async () => {
+    syncNativePanel = createNativePanelSync({
+        document, worldNames: world_names, getSettings, getSelection: getChatSelection, getCaptured: statusForEntry,
+    });
     await renderSettings();
     eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onWorldInfoEntriesLoaded);
     eventSource.on(event_types.CHAT_CREATED, onChatCreated);
