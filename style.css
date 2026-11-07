@@ -244,12 +244,23 @@ SOFTWARE.
     width: 100%;
 }
 
-/* 跟随酒馆主题；标记保持轻量，但不暗示会保存到原书。 */
-.lg-native-toggle { cursor: default; }
+/* 跟随酒馆主题。开关和小字放在条目最上面独立一行，不压在原生开关上，也不受其他插件改布局影响。 */
+.lg-native-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    flex: 0 0 100%;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.2em 0.4em;
+    position: relative;
+    z-index: 1;
+}
+.lg-native-toggle { cursor: default; flex: 0 0 auto; }
 .lg-native-badge {
     font-size: 0.72em;
     opacity: 0.8;
-    margin-inline: 0.35em;
-    white-space: nowrap;
+    min-width: 0;
+    overflow-wrap: anywhere;
     color: inherit;
 }

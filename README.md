@@ -2,7 +2,7 @@
 
 A [SillyTavern](https://github.com/SillyTavern/SillyTavern) extension that lets you use a lorebook (World Info) as a set of per-chat parameters, instead of manually enabling/disabling entries every time you switch chats.
 
-You keep a single shared lorebook. This extension decides, per chat, which entries actually fire — without ever editing the lorebook file itself.
+You keep a single shared lorebook. This extension decides, per chat, which entries actually fire — and mirrors the result into the book's `disable` flags (with an automatic backup).
 
 ## The problem this solves
 
@@ -27,7 +27,7 @@ Entries are filtered at generation time (the same moment SillyTavern decides whi
 - **Automatic prompt on new chats** — the picker pops up once when you start a brand-new chat with a character. Switching between existing chats doesn't re-prompt.
 - **Manual reconfigure** — reopen the picker for the current chat any time via the settings panel button or the `/loregovernor` slash command.
 - **Quick Reply status panel** — use the `Lore 状态` button in the Quick Reply bar to inspect governed entries and whole-book toggles for the current chat. Unmanaged entries are intentionally omitted.
-- **Never touches the lorebook file** — governance is applied in memory at generation time; the underlying World Info file's `disable` flags are never written to.
+- **Writes the chat's choice back to the lorebook** — whenever a chat is opened/switched or groups change, the current chat's result is synced (debounced) into each governed entry's `disable` flag, so other tools that read the book directly see the same on/off state. Only `disable` of grouped entries is changed. Before the first write-back the whole book is backed up inside the extension settings; the ↺ button next to the book in the settings panel restores it.
 
 ## Installation
 

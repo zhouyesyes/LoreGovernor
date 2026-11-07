@@ -22,10 +22,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-import { createNativePanelSync } from './native-panel.mjs';
+import { createNativePanelSync, governedState } from './native-panel.mjs';
 import { eventSource, event_types } from '../../../../script.js';
 import { getContext } from '../../../extensions.js';
-import { world_names, loadWorldInfo, updateWorldInfoList } from '../../../world-info.js';
+import { world_names, loadWorldInfo, saveWorldInfo, updateWorldInfoList } from '../../../world-info.js';
 import { POPUP_TYPE } from '../../../popup.js';
 
 const MODULE_NAME = 'lore_governor';
@@ -42,6 +42,62 @@ function invalidateVisualState() {
     lastEffectiveStates = new Map();
     hasCapturedEffectiveStates = false;
     syncNativePanel();
+    scheduleWriteBack();
+}
+
+// ---- 写回原书：以当前聊天的分组配置为准，只改条目的 disable 开关 ----
+let writeBackTimer = null;
+let writeBackChain = Promise.resolve();
+
+function scheduleWriteBack() {
+    clearTimeout(writeBackTimer);
+    // 防抖：连续操作只在停下来 0.8 秒后写一次
+    writeBackTimer = setTimeout(() => {
+        writeBackChain = writeBackChain.then(writeBackAll).catch(err => console.warn('[LoreGovernor] 写回原书失败', err));
+    }, 800);
+}
+
+// 每本书第一次写回前，把原书完整存一份在扩展设置里（备份），可在设置面板里「恢复原书」。
+function ensureBackup(bookCfg, data) {
+    if (bookCfg.backup) return;
+    bookCfg.backup = { time: new Date().toISOString(), data: structuredClone(data) };
+    getContext().saveSettingsDebounced();
+}
+
+async function writeBackAll() {
+    const context = getContext();
+    const chatId = context.chatId;
+    if (!chatId) return; // 没有打开聊天就不写
+    const settings = getSettings();
+    for (const bookCfg of settings.entryBooks) {
+        if (!Object.values(bookCfg.assignments).some(b => b !== BUCKET_UNMANAGED)) continue;
+        const data = await loadWorldInfo(bookCfg.name);
+        if (!data?.entries) continue;
+        // 读书期间如果已经切了聊天，这次作废（新聊天会另外触发一次），避免把旧聊天的状态写到书上
+        if (getContext().chatId !== chatId) return;
+        const selection = getChatSelection();
+        const changes = [];
+        for (const entry of Object.values(data.entries)) {
+            const uid = String(entry.uid);
+            const want = governedState(settings, selection, bookCfg.name, uid, entry.disable !== true);
+            if (want === null) continue; // 没被分组管到的不动
+            if ((entry.disable === true) !== !want) changes.push([entry, !want]);
+        }
+        if (!changes.length) continue;
+        ensureBackup(bookCfg, data);
+        for (const [entry, disable] of changes) entry.disable = disable;
+        await saveWorldInfo(bookCfg.name, data, true);
+    }
+}
+
+async function restoreBook(bookName) {
+    const bookCfg = getSettings().entryBooks.find(b => b.name === bookName);
+    if (!bookCfg?.backup?.data) {
+        toastr.info('这本书还没有备份（还没写回过）。');
+        return;
+    }
+    await saveWorldInfo(bookName, structuredClone(bookCfg.backup.data), true);
+    toastr.success(`已把「${bookName}」恢复成写回前的样子。之后切换聊天时仍会按分组重新同步；不想同步请先把它从受管列表里移除。`);
 }
 
 const BUCKET_LABELS = {
@@ -273,6 +329,7 @@ async function openStatusPanel() {
 }
 
 function onChatChanged() {
+    clearTimeout(writeBackTimer); // 切聊天：丢掉上一个聊天排的写入，重新按新聊天排
     invalidateVisualState();
 }
 
@@ -419,7 +476,7 @@ async function renderSettings() {
             <div class="inline-drawer-content">
                 <div class="lore-governor-block">
                     <h4>条目级管理的世界书</h4>
-                    <small>为每本世界书创建分组,将条目分配到分组中,然后在每次聊天时选择要启用的条目。未分配(不受管理)的条目不会被触动。</small>
+                    <small>为每本世界书创建分组,将条目分配到分组中,然后在每次聊天时选择要启用的条目。当前聊天的选择会同步写进原书条目的开关(只改开关,每本书第一次写回前会自动备份)。未分配(不受管理)的条目不会被触动。</small>
                     <div class="lore-governor-row">
                         <select class="lore-governor-add-entry-book text_pole"></select>
                         <button class="menu_button lore-governor-add-entry-book-btn">添加</button>
@@ -474,6 +531,7 @@ async function renderSettings() {
                 <div class="lore-governor-book-row">
                     <span class="lore-governor-book-name">${DOMPurify.sanitize(bookCfg.name)}</span>
                     <button class="menu_button lore-governor-groups-btn" data-book="${DOMPurify.sanitize(bookCfg.name)}">Groups (${bookCfg.groups.length})</button>
+                    <button class="menu_button lore-governor-restore-book-btn" data-book="${DOMPurify.sanitize(bookCfg.name)}" title="恢复成第一次写回前的原书"${bookCfg.backup ? '' : ' disabled'}><i class="fa-solid fa-rotate-left"></i></button>
                     <button class="menu_button lore-governor-remove-entry-book-btn" data-book="${DOMPurify.sanitize(bookCfg.name)}"><i class="fa-solid fa-trash"></i></button>
                 </div>
             `);
@@ -504,6 +562,13 @@ async function renderSettings() {
         settings.entryBooks.push({ name, groups: [], assignments: {} });
         saveSettings();
         renderEntryBooksList();
+    });
+
+    $drawer.on('click', '.lore-governor-restore-book-btn', async function () {
+        const name = String($(this).data('book'));
+        if (!confirm(`把「${name}」恢复成第一次写回前的样子？`)) return;
+        clearTimeout(writeBackTimer);
+        await restoreBook(name);
     });
 
     $drawer.on('click', '.lore-governor-remove-entry-book-btn', function () {
@@ -678,6 +743,7 @@ jQuery(async () => {
     eventSource.on(event_types.CHAT_CREATED, onChatCreated);
     eventSource.on(event_types.GROUP_CHAT_CREATED, onChatCreated);
     if (event_types.CHAT_CHANGED) eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
+    scheduleWriteBack(); // 刚打开页面时也同步一次
 
     const context = getContext();
     context.SlashCommandParser.addCommandObject(context.SlashCommand.fromProps({

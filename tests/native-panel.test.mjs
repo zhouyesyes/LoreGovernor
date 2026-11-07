@@ -36,7 +36,7 @@ test('面板生命周期、事件合并和只读视觉同步', async () => {
         await wait();
         assert.equal(scans, 1);
         assert.equal(document.querySelectorAll('.lg-native-badge').length, 1);
-        assert.match(document.querySelector('.lg-native-badge').textContent, /不写回原书/);
+        assert.match(document.querySelector('.lg-native-badge').textContent, /同步到原书/);
         let writes = 0;
         const watcher = new MutationObserver(records => writes += records.length);
         watcher.observe(list, { subtree: true, childList: true, attributes: true });
