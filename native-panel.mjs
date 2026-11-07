@@ -72,8 +72,7 @@ export function createNativePanelSync({ document, worldNames, getSettings, getSe
         });
     };
     function restore(row, state) {
-        state.visual.remove();
-        state.badge.remove();
+        state.bar.remove();
         state.original.hidden = state.hidden;
         if (state.display) state.original.style.setProperty('display', state.display, state.priority);
         else state.original.style.removeProperty('display');
@@ -94,7 +93,7 @@ export function createNativePanelSync({ document, worldNames, getSettings, getSe
             const rows = new Set(list.querySelectorAll('.world_entry[uid]'));
             for (const [row, state] of managed) {
                 if (!rows.has(row) || state.book !== book || state.uid !== row.getAttribute('uid') ||
-                    !row.contains(state.original) || !row.contains(state.visual) || !row.contains(state.badge)) restore(row, state);
+                    !row.contains(state.original) || !row.contains(state.bar)) restore(row, state);
             }
             for (const row of rows) {
                 const uid = row.getAttribute('uid');
@@ -118,12 +117,16 @@ export function createNativePanelSync({ document, worldNames, getSettings, getSe
                     visual.addEventListener('click', event => { event.preventDefault(); event.stopImmediatePropagation(); });
                     const badge = document.createElement('small');
                     badge.className = 'lg-native-badge';
-                    badge.textContent = '聊天配置 · 不写回原书';
-                    state = { book, uid, original, visual, badge, hidden: original.hidden, display: original.style.getPropertyValue('display'), priority: original.style.getPropertyPriority('display'), disabled: row.classList.contains('disabledWIEntry') };
+                    badge.textContent = '聊天配置 · 会同步到原书';
+                    // 独立一行放在条目最上面：不依赖原生标题栏的排布，装了「原版世界书优化」之类改布局的插件也能看到、点到。
+                    const bar = document.createElement('div');
+                    bar.className = 'lg-native-bar';
+                    bar.append(visual, badge);
+                    state = { book, uid, original, visual, badge, bar, hidden: original.hidden, display: original.style.getPropertyValue('display'), priority: original.style.getPropertyPriority('display'), disabled: row.classList.contains('disabledWIEntry') };
                     managed.set(row, state);
                     original.hidden = true;
                     original.style.setProperty('display', 'none', 'important');
-                    original.after(visual, badge);
+                    row.prepend(bar);
                 }
                 const enabled = getCaptured(book, uid)?.enabled ?? expected;
                 if (row.classList.contains('disabledWIEntry') !== !enabled) {
@@ -134,7 +137,7 @@ export function createNativePanelSync({ document, worldNames, getSettings, getSe
                 state.visual.classList.toggle('fa-toggle-on', enabled);
                 state.visual.classList.toggle('fa-toggle-off', !enabled);
                 state.visual.setAttribute('aria-label', '聊天配置：' + (enabled ? '启用' : '关闭'));
-                state.visual.title = 'Lore Governor 当前聊天：' + (enabled ? '启用' : '关闭') + '。请在扩展中配置；不写回原始世界书。启用仍需满足关键词、概率等原生触发条件。';
+                state.visual.title = 'Lore Governor 当前聊天：' + (enabled ? '启用' : '关闭') + '。请在扩展中配置；改动会自动同步到原书的开关。启用仍需满足关键词、概率等原生触发条件。';
                 state.badge.title = state.visual.title;
             }
         } catch {
